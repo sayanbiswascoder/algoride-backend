@@ -1,0 +1,51 @@
+# ── Dependencies ──────────────────────
+node_modules/
+.pnp
+.pnp.js
+
+# ── Build output ──────────────────────
+frontend/dist/
+frontend/build/
+backend/dist/
+
+# ── Environment variables ─────────────
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+# Keep .env.example files
+!.env.example
+
+# ── Firebase ──────────────────────────
+backend/serviceAccountKey.json
+*.sqlite
+*.sqlite3
+
+# ── Logs ──────────────────────────────
+logs/
+*.log
+npm-debug.log*
+
+# ── OS files ──────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Editor / IDE ──────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ── Vite cache ────────────────────────
+frontend/node_modules/.vite/
+
+# ── Coverage & testing ────────────────
+coverage/
+.nyc_output/
+
+# ── Misc ──────────────────────────────
+*.tgz
+.cache/

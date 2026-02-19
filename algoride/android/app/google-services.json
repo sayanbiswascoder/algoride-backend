@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "598451197406",
+    "project_id": "algoride-cfb47",
+    "storage_bucket": "algoride-cfb47.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:598451197406:android:7256710f5de6a582e6f94f",
+        "android_client_info": {
+          "package_name": "com.algoride"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "598451197406-2f9eq2be65q4h4us3emfaafs1r61jdc6.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCmjnHl7Zz-kUjKkVIlUQ-AG-OMY__Pbd4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "598451197406-2f9eq2be65q4h4us3emfaafs1r61jdc6.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
