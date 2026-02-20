@@ -38,9 +38,9 @@ app.use((err, _req, res, _next) => {
 });
 
 // ── Start ────────────────────────────────────────────────
-//app.listen(PORT, () => {
-//  console.log(`🚗 Campus Ride-Share API running on http://localhost:${PORT}`);
-//});
+app.listen(PORT, () => {
+  console.log(`🚗 Campus Ride-Share API running on http://localhost:${PORT}`);
+});
 
 // Export for Vercel serverless
 module.exports = app;
