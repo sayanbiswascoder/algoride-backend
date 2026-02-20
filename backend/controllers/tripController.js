@@ -12,27 +12,21 @@ const usersRef = db.collection('users');
 async function createTrip(req, res) {
     try {
         const {
-            driverId, origin, originLat, originLng,
-            destination, destinationLat, destinationLng,
-            distance, departureTime, seatsAvailable, pricePerKm,
+            driverId, origin, destination,
+            price, departureTime, seatsAvailable,
         } = req.body;
 
-        if (!driverId || !origin || !destination || !departureTime || !seatsAvailable || !pricePerKm) {
+        if (!driverId || !origin || !destination || !price || !departureTime || !seatsAvailable) {
             return res.status(400).json({ error: 'Missing required trip fields' });
         }
 
         const tripData = {
             driverId,
             origin,
-            originLat: originLat || null,
-            originLng: originLng || null,
             destination,
-            destinationLat: destinationLat || null,
-            destinationLng: destinationLng || null,
-            distance: distance || 0,
+            price: parseFloat(price),
             departureTime: new Date(departureTime).toISOString(),
             seatsAvailable: parseInt(seatsAvailable, 10),
-            pricePerKm: parseFloat(pricePerKm),
             status: 'active',
             createdAt: new Date().toISOString(),
         };

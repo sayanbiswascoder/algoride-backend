@@ -3,6 +3,8 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'firebase_options.dart';
 import 'screens/login_screen.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'screens/home_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -28,7 +30,23 @@ class AlgoRideApp extends StatelessWidget {
         fontFamily: 'SF Pro Display',
         useMaterial3: true,
       ),
-      home: const LoginScreen(),
+      home: StreamBuilder<User?>(
+        stream: FirebaseAuth.instance.authStateChanges(),
+        builder: (context, snapshot) {
+          // Show a small loader while checking current session
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Scaffold(
+              body: Center(child: CircularProgressIndicator()),
+            );
+          }
+
+          // If logged in, go to Home. Otherwise show Login.
+          if (snapshot.hasData && snapshot.data != null) {
+            return const HomeScreen();
+          }
+          return const LoginScreen();
+        },
+      ),
     );
   }
 }

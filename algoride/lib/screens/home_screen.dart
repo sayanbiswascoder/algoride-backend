@@ -1,7 +1,11 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart';
-import 'search_screen.dart';
+import 'wallet_screen.dart';
+import 'add_trip_screen.dart';
+import 'activity_screen.dart';
+import 'ride_detail_screen.dart';
+import '../services/auth_service.dart';
+import '../services/trip_service.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -11,15 +15,18 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
-  final Completer<GoogleMapController> _mapController = Completer();
   int _currentNavIndex = 0;
 
-  // Selected destination from search
-  SelectedPlace? _selectedPlace;
-  Set<Marker> _markers = {};
+  // Search controllers
+  final _pickupCtrl = TextEditingController();
+  final _dropCtrl = TextEditingController();
+  Timer? _searchDebounce;
 
-  late AnimationController _slideCtrl;
-  late Animation<Offset> _slideAnim;
+  // Trip data
+  List<Map<String, dynamic>> _trips = [];
+  bool _isLoading = true;
+  String? _error;
+
   late AnimationController _fadeCtrl;
   late Animation<double> _fadeAnim;
 
@@ -33,74 +40,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   static const _textPrimary = Color(0xFFE8EDF5);
   static const _textSecondary = Color(0xFF8A96B0);
   static const _success = Color(0xFF00E5A0);
-
-  // Default map position (New York)
-  static const _initialPosition = CameraPosition(
-    target: LatLng(40.7128, -74.0060),
-    zoom: 14.0,
-  );
-
-  // Dark map style
-  static const String _darkMapStyle = '''
-[
-  {"elementType":"geometry","stylers":[{"color":"#0a0e1a"}]},
-  {"elementType":"labels.icon","stylers":[{"visibility":"off"}]},
-  {"elementType":"labels.text.fill","stylers":[{"color":"#8a96b0"}]},
-  {"elementType":"labels.text.stroke","stylers":[{"color":"#0a0e1a"}]},
-  {"featureType":"administrative","elementType":"geometry","stylers":[{"color":"#1a2235"}]},
-  {"featureType":"poi","elementType":"geometry","stylers":[{"color":"#121826"}]},
-  {"featureType":"poi.park","elementType":"geometry","stylers":[{"color":"#121826"}]},
-  {"featureType":"road","elementType":"geometry.fill","stylers":[{"color":"#1a2235"}]},
-  {"featureType":"road","elementType":"geometry.stroke","stylers":[{"color":"#2a3550"}]},
-  {"featureType":"road.highway","elementType":"geometry","stylers":[{"color":"#2a3550"}]},
-  {"featureType":"transit","elementType":"geometry","stylers":[{"color":"#1a2235"}]},
-  {"featureType":"water","elementType":"geometry","stylers":[{"color":"#0d1420"}]}
-]
-''';
-
-  // Suggested rides data
-  final List<Map<String, dynamic>> _suggestedRides = [
-    {
-      'name': 'Tesla Model 3',
-      'type': 'Electric · Premium',
-      'rating': 4.9,
-      'price': '\$12.50',
-      'eta': '3 min',
-      'icon': Icons.electric_car_rounded,
-      'color': Color(0xFF00E5A0),
-    },
-    {
-      'name': 'Honda Civic',
-      'type': 'Sedan · Economy',
-      'rating': 4.7,
-      'price': '\$8.00',
-      'eta': '5 min',
-      'icon': Icons.directions_car_rounded,
-      'color': Color(0xFF6C63FF),
-    },
-    {
-      'name': 'Toyota Camry',
-      'type': 'Sedan · Comfort',
-      'rating': 4.8,
-      'price': '\$10.00',
-      'eta': '4 min',
-      'icon': Icons.directions_car_filled_rounded,
-      'color': Color(0xFF00C6FF),
-    },
-  ];
+  static const _error_ = Color(0xFFFF5C7A);
 
   @override
   void initState() {
     super.initState();
-
-    _slideCtrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 700),
-    );
-    _slideAnim = Tween<Offset>(
-      begin: const Offset(0, 0.3),
-      end: Offset.zero,
-    ).animate(CurvedAnimation(parent: _slideCtrl, curve: Curves.easeOutCubic));
 
     _fadeCtrl = AnimationController(
       vsync: this,
@@ -108,39 +52,149 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
     _fadeAnim = CurvedAnimation(parent: _fadeCtrl, curve: Curves.easeOut);
 
-    // Stagger the animations
-    Future.delayed(const Duration(milliseconds: 300), () {
-      if (mounted) {
-        _slideCtrl.forward();
-        _fadeCtrl.forward();
-      }
+    Future.delayed(const Duration(milliseconds: 200), () {
+      if (mounted) _fadeCtrl.forward();
     });
+
+    _fetchTrips();
   }
 
   @override
   void dispose() {
-    _slideCtrl.dispose();
     _fadeCtrl.dispose();
+    _pickupCtrl.dispose();
+    _dropCtrl.dispose();
+    _searchDebounce?.cancel();
     super.dispose();
+  }
+
+  // ── Data ────────────────────────────────────────────────────────────────
+  Future<void> _fetchTrips() async {
+    setState(() {
+      _isLoading = true;
+      _error = null;
+    });
+
+    try {
+      final trips = await TripService.instance.getTrips(
+        origin: _pickupCtrl.text.trim().isEmpty
+            ? null
+            : _pickupCtrl.text.trim(),
+        destination: _dropCtrl.text.trim().isEmpty
+            ? null
+            : _dropCtrl.text.trim(),
+      );
+      if (mounted) {
+        setState(() {
+          _trips = trips;
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _error = e.toString().replaceFirst('Exception: ', '');
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
+  void _onSearchChanged() {
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(const Duration(milliseconds: 500), () {
+      _fetchTrips();
+    });
+  }
+
+  void _showAccountMenu() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: _card,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 40,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: 20),
+                decoration: BoxDecoration(
+                  color: _border,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const Text(
+                'Account',
+                style: TextStyle(
+                  color: _textPrimary,
+                  fontSize: 20,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 24),
+              SizedBox(
+                width: double.infinity,
+                height: 50,
+                child: ElevatedButton.icon(
+                  onPressed: () async {
+                    Navigator.pop(ctx);
+                    await AuthService.instance.signOut();
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _error_,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    elevation: 0,
+                  ),
+                  icon: const Icon(Icons.logout_rounded, size: 20),
+                  label: const Text(
+                    'Sign Out',
+                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildHomeContent() {
+    return SafeArea(
+      child: FadeTransition(
+        opacity: _fadeAnim,
+        child: Column(
+          children: [
+            _buildHeader(),
+            _buildSearchBars(),
+            Expanded(child: _buildRideList()),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: _bg,
-      body: Stack(
+      body: IndexedStack(
+        index: _currentNavIndex <= 3 ? _currentNavIndex : 0,
         children: [
-          // ── Full-screen Google Map ──────────────────────────────────
-          _buildMap(),
-
-          // ── Top gradient overlay ───────────────────────────────────
-          _buildTopGradient(),
-
-          // ── Search bar ─────────────────────────────────────────────
-          _buildSearchBar(),
-
-          // ── Bottom sheet with rides ─────────────────────────────────
-          _buildBottomSheet(),
+          _buildHomeContent(), // 0 — Home
+          const ActivityScreen(), // 1 — Activity
+          const SizedBox.shrink(), // 2 — placeholder (FAB)
+          const WalletScreen(), // 3 — Wallet
         ],
       ),
       bottomNavigationBar: _buildBottomNav(),
@@ -148,277 +202,82 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // MAP
+  // HEADER
   // ═══════════════════════════════════════════════════════════════════════════
 
-  Widget _buildMap() {
-    return GoogleMap(
-      initialCameraPosition: _initialPosition,
-      mapType: MapType.normal,
-      myLocationEnabled: true,
-      myLocationButtonEnabled: false,
-      zoomControlsEnabled: false,
-      compassEnabled: false,
-      mapToolbarEnabled: false,
-      markers: _markers,
-      onMapCreated: (GoogleMapController controller) {
-        _mapController.complete(controller);
-        controller.setMapStyle(_darkMapStyle);
-      },
-    );
-  }
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // TOP GRADIENT
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  Widget _buildTopGradient() {
-    return Positioned(
-      top: 0,
-      left: 0,
-      right: 0,
-      height: 160,
-      child: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [Color(0xE60A0E1A), Color(0x000A0E1A)],
-          ),
-        ),
-      ),
-    );
-  }
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // SEARCH BAR
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  Future<void> _openSearch() async {
-    final result = await Navigator.of(context).push<SelectedPlace>(
-      PageRouteBuilder(
-        pageBuilder: (_, __, ___) => const SearchScreen(),
-        transitionsBuilder: (_, animation, __, child) {
-          return SlideTransition(
-            position: Tween<Offset>(begin: const Offset(0, 1), end: Offset.zero)
-                .animate(
-                  CurvedAnimation(
-                    parent: animation,
-                    curve: Curves.easeOutCubic,
-                  ),
+  Widget _buildHeader() {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'AlgoRide',
+                style: TextStyle(
+                  color: _textPrimary,
+                  fontSize: 26,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: -0.5,
                 ),
-            child: child,
-          );
-        },
-        transitionDuration: const Duration(milliseconds: 350),
-      ),
-    );
-
-    if (result != null && mounted) {
-      setState(() {
-        _selectedPlace = result;
-        _markers = {
-          Marker(
-            markerId: const MarkerId('destination'),
-            position: result.latLng,
-            infoWindow: InfoWindow(title: result.name),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                'Find your next ride',
+                style: TextStyle(
+                  color: _textSecondary,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w400,
+                ),
+              ),
+            ],
           ),
-        };
-      });
-
-      // Animate the camera to the selected place
-      final controller = await _mapController.future;
-      controller.animateCamera(
-        CameraUpdate.newCameraPosition(
-          CameraPosition(target: result.latLng, zoom: 15.0),
-        ),
-      );
-    }
-  }
-
-  Widget _buildSearchBar() {
-    return Positioned(
-      top: MediaQuery.of(context).padding.top + 16,
-      left: 20,
-      right: 20,
-      child: FadeTransition(
-        opacity: _fadeAnim,
-        child: GestureDetector(
-          onTap: _openSearch,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             decoration: BoxDecoration(
-              color: _card,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: _border),
-              boxShadow: const [
-                BoxShadow(
-                  color: Color(0x40000000),
-                  blurRadius: 20,
-                  offset: Offset(0, 8),
-                ),
-              ],
+              color: _success.withAlpha(25),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: _success.withAlpha(60)),
             ),
             child: Row(
               children: [
-                // Pulsing green dot
                 Container(
-                  width: 10,
-                  height: 10,
+                  width: 8,
+                  height: 8,
                   decoration: BoxDecoration(
-                    color: _selectedPlace != null ? _accent : _success,
+                    color: _success,
                     shape: BoxShape.circle,
                     boxShadow: [
-                      BoxShadow(
-                        color: (_selectedPlace != null ? _accent : _success)
-                            .withAlpha(100),
-                        blurRadius: 8,
-                      ),
+                      BoxShadow(color: _success.withAlpha(80), blurRadius: 6),
                     ],
                   ),
                 ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Text(
-                    _selectedPlace?.name ?? 'Where to?',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: _selectedPlace != null
-                          ? _textPrimary
-                          : _textSecondary,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ),
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: _accentGlow,
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: const Icon(
-                    Icons.search_rounded,
-                    color: _accent,
-                    size: 20,
+                const SizedBox(width: 6),
+                Text(
+                  '${_trips.length} rides',
+                  style: const TextStyle(
+                    color: _success,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
               ],
             ),
           ),
-        ),
+        ],
       ),
     );
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // BOTTOM SHEET — SUGGESTED RIDES
+  // SEARCH BARS
   // ═══════════════════════════════════════════════════════════════════════════
 
-  Widget _buildBottomSheet() {
-    return Positioned(
-      bottom: 0,
-      left: 0,
-      right: 0,
-      child: SlideTransition(
-        position: _slideAnim,
-        child: FadeTransition(
-          opacity: _fadeAnim,
-          child: Container(
-            decoration: const BoxDecoration(
-              color: _bg,
-              borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-              boxShadow: [
-                BoxShadow(
-                  color: Color(0x60000000),
-                  blurRadius: 24,
-                  offset: Offset(0, -8),
-                ),
-              ],
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // Drag handle
-                Center(
-                  child: Container(
-                    margin: const EdgeInsets.only(top: 12, bottom: 16),
-                    width: 40,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: _border,
-                      borderRadius: BorderRadius.circular(2),
-                    ),
-                  ),
-                ),
-
-                // Title
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 24),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text(
-                        'Suggested Rides',
-                        style: TextStyle(
-                          color: _textPrimary,
-                          fontSize: 20,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: -0.3,
-                        ),
-                      ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 5,
-                        ),
-                        decoration: BoxDecoration(
-                          color: _accentGlow,
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: const Text(
-                          'View All',
-                          style: TextStyle(
-                            color: _accent,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 16),
-
-                // Ride cards — horizontal scroll
-                SizedBox(
-                  height: 160,
-                  child: ListView.builder(
-                    scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.symmetric(horizontal: 20),
-                    itemCount: _suggestedRides.length,
-                    itemBuilder: (context, index) {
-                      return _buildRideCard(_suggestedRides[index], index);
-                    },
-                  ),
-                ),
-                const SizedBox(height: 20),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildRideCard(Map<String, dynamic> ride, int index) {
-    final color = ride['color'] as Color;
-
+  Widget _buildSearchBars() {
     return Container(
-      width: 200,
-      margin: const EdgeInsets.only(right: 14),
+      margin: const EdgeInsets.fromLTRB(20, 16, 20, 12),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: _card,
@@ -426,7 +285,288 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         border: Border.all(color: _border),
         boxShadow: const [
           BoxShadow(
-            color: Color(0x20000000),
+            color: Color(0x30000000),
+            blurRadius: 20,
+            offset: Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          // Pickup
+          _buildSearchField(
+            controller: _pickupCtrl,
+            hint: 'Pickup location',
+            dotColor: _success,
+            icon: Icons.trip_origin_rounded,
+          ),
+          // Connector line
+          Padding(
+            padding: const EdgeInsets.only(left: 18),
+            child: Row(
+              children: [
+                Container(
+                  width: 2,
+                  height: 20,
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [_success.withAlpha(60), _error_.withAlpha(60)],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          // Drop-off
+          _buildSearchField(
+            controller: _dropCtrl,
+            hint: 'Drop-off location',
+            dotColor: _error_,
+            icon: Icons.location_on_rounded,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSearchField({
+    required TextEditingController controller,
+    required String hint,
+    required Color dotColor,
+    required IconData icon,
+  }) {
+    return Container(
+      decoration: BoxDecoration(
+        color: _surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: _border.withAlpha(120)),
+      ),
+      child: Row(
+        children: [
+          const SizedBox(width: 14),
+          Container(
+            width: 10,
+            height: 10,
+            decoration: BoxDecoration(
+              color: dotColor,
+              shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(color: dotColor.withAlpha(80), blurRadius: 6),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: TextField(
+              controller: controller,
+              onChanged: (_) => _onSearchChanged(),
+              style: const TextStyle(color: _textPrimary, fontSize: 14),
+              decoration: InputDecoration(
+                hintText: hint,
+                hintStyle: const TextStyle(color: _textSecondary, fontSize: 14),
+                border: InputBorder.none,
+                contentPadding: const EdgeInsets.symmetric(vertical: 14),
+              ),
+            ),
+          ),
+          if (controller.text.isNotEmpty)
+            GestureDetector(
+              onTap: () {
+                controller.clear();
+                _onSearchChanged();
+              },
+              child: const Padding(
+                padding: EdgeInsets.only(right: 12),
+                child: Icon(
+                  Icons.close_rounded,
+                  color: _textSecondary,
+                  size: 18,
+                ),
+              ),
+            )
+          else
+            Padding(
+              padding: const EdgeInsets.only(right: 12),
+              child: Icon(icon, color: dotColor.withAlpha(100), size: 18),
+            ),
+        ],
+      ),
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // RIDE LIST
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  Widget _buildRideList() {
+    if (_isLoading) {
+      return const Center(child: CircularProgressIndicator(color: _accent));
+    }
+
+    if (_error != null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.wifi_off_rounded,
+                color: _textSecondary.withAlpha(80),
+                size: 48,
+              ),
+              const SizedBox(height: 16),
+              Text(
+                _error!,
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: _textSecondary, fontSize: 14),
+              ),
+              const SizedBox(height: 20),
+              ElevatedButton.icon(
+                onPressed: _fetchTrips,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _accent,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                icon: const Icon(Icons.refresh_rounded, size: 18),
+                label: const Text('Retry'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    if (_trips.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.directions_car_filled_rounded,
+                color: _accent.withAlpha(60),
+                size: 56,
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'No rides available',
+                style: TextStyle(
+                  color: _textPrimary,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 6),
+              const Text(
+                'Be the first to offer a ride!',
+                style: TextStyle(color: _textSecondary, fontSize: 14),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return RefreshIndicator(
+      color: _accent,
+      backgroundColor: _card,
+      onRefresh: _fetchTrips,
+      child: ListView.builder(
+        physics: const AlwaysScrollableScrollPhysics(
+          parent: BouncingScrollPhysics(),
+        ),
+        padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
+        itemCount: _trips.length,
+        itemBuilder: (context, index) {
+          final trip = _trips[index];
+          return GestureDetector(
+            onTap: () async {
+              final booked = await Navigator.push(
+                context,
+                PageRouteBuilder(
+                  pageBuilder: (_, __, ___) => RideDetailScreen(trip: trip),
+                  transitionsBuilder: (_, animation, __, child) {
+                    return SlideTransition(
+                      position:
+                          Tween<Offset>(
+                            begin: const Offset(1, 0),
+                            end: Offset.zero,
+                          ).animate(
+                            CurvedAnimation(
+                              parent: animation,
+                              curve: Curves.easeOutCubic,
+                            ),
+                          ),
+                      child: child,
+                    );
+                  },
+                  transitionDuration: const Duration(milliseconds: 350),
+                ),
+              );
+              if (booked == true && mounted) _fetchTrips();
+            },
+            child: _buildTripCard(trip),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildTripCard(Map<String, dynamic> trip) {
+    final origin = trip['origin'] ?? 'Unknown';
+    final destination = trip['destination'] ?? 'Unknown';
+    final price = trip['price']?.toStringAsFixed(2) ?? '0.00';
+    final seats = trip['seatsAvailable'] ?? 0;
+    final driver = trip['driver'];
+    final driverName = driver?['name'] ?? 'Unknown Driver';
+    final rating = driver?['rating']?.toStringAsFixed(1) ?? '—';
+
+    // Format departure time
+    String departureLabel = '';
+    if (trip['departureTime'] != null) {
+      try {
+        final dt = DateTime.parse(trip['departureTime']).toLocal();
+        final months = [
+          '',
+          'Jan',
+          'Feb',
+          'Mar',
+          'Apr',
+          'May',
+          'Jun',
+          'Jul',
+          'Aug',
+          'Sep',
+          'Oct',
+          'Nov',
+          'Dec',
+        ];
+        final hour = dt.hour > 12
+            ? dt.hour - 12
+            : (dt.hour == 0 ? 12 : dt.hour);
+        final amPm = dt.hour >= 12 ? 'PM' : 'AM';
+        final minute = dt.minute.toString().padLeft(2, '0');
+        departureLabel = '${months[dt.month]} ${dt.day} · $hour:$minute $amPm';
+      } catch (_) {}
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 14),
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: _card,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: _border),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x18000000),
             blurRadius: 12,
             offset: Offset(0, 4),
           ),
@@ -435,93 +575,230 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Top row — icon + rating
+          // ── Route row ──────────────────────────────────────────────
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: color.withAlpha(30),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Icon(ride['icon'] as IconData, color: color, size: 22),
-              ),
-              Row(
+              // Route dots
+              Column(
                 children: [
-                  const Icon(
-                    Icons.star_rounded,
-                    color: Color(0xFFFFD700),
-                    size: 16,
+                  Container(
+                    width: 10,
+                    height: 10,
+                    decoration: BoxDecoration(
+                      color: _success,
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(color: _success.withAlpha(80), blurRadius: 6),
+                      ],
+                    ),
                   ),
-                  const SizedBox(width: 3),
-                  Text(
-                    '${ride['rating']}',
-                    style: const TextStyle(
-                      color: _textPrimary,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
+                  Container(
+                    width: 2,
+                    height: 28,
+                    margin: const EdgeInsets.symmetric(vertical: 3),
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [_success.withAlpha(60), _error_.withAlpha(60)],
+                      ),
+                    ),
+                  ),
+                  Container(
+                    width: 10,
+                    height: 10,
+                    decoration: BoxDecoration(
+                      color: _error_,
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(color: _error_.withAlpha(80), blurRadius: 6),
+                      ],
                     ),
                   ),
                 ],
               ),
-            ],
-          ),
-          const Spacer(),
-
-          // Name
-          Text(
-            ride['name'] as String,
-            style: const TextStyle(
-              color: _textPrimary,
-              fontSize: 15,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const SizedBox(height: 2),
-          Text(
-            ride['type'] as String,
-            style: const TextStyle(color: _textSecondary, fontSize: 11),
-          ),
-          const SizedBox(height: 10),
-
-          // Bottom row — price + ETA
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                ride['price'] as String,
-                style: TextStyle(
-                  color: color,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(
-                  color: _surface,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Row(
+              const SizedBox(width: 14),
+              // Route texts
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Icon(
-                      Icons.access_time_rounded,
-                      color: _textSecondary,
-                      size: 12,
-                    ),
-                    const SizedBox(width: 4),
                     Text(
-                      ride['eta'] as String,
+                      origin,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
-                        color: _textSecondary,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w500,
+                        color: _textPrimary,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 18),
+                    Text(
+                      destination,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: _textPrimary,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
                   ],
                 ),
               ),
+              // Price badge
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [Color(0xFF1E1440), Color(0xFF2A1B5E)],
+                  ),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: _accent.withAlpha(60)),
+                ),
+                child: Column(
+                  children: [
+                    Text(
+                      '\$$price',
+                      style: const TextStyle(
+                        color: _accent,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const Text(
+                      'ALGO',
+                      style: TextStyle(
+                        color: _textSecondary,
+                        fontSize: 9,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 1,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+
+          // Divider
+          Container(height: 1, color: _border.withAlpha(80)),
+          const SizedBox(height: 12),
+
+          // ── Bottom info row ────────────────────────────────────────
+          Row(
+            children: [
+              // Driver
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: _accent.withAlpha(20),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Icon(
+                  Icons.person_rounded,
+                  color: _accent,
+                  size: 16,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  driverName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: _textPrimary,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+
+              // Rating
+              if (rating != '—') ...[
+                const Icon(
+                  Icons.star_rounded,
+                  color: Color(0xFFFFD700),
+                  size: 14,
+                ),
+                const SizedBox(width: 3),
+                Text(
+                  rating,
+                  style: const TextStyle(
+                    color: _textPrimary,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(width: 12),
+              ],
+
+              // Seats
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: _surface,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: _border.withAlpha(80)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.event_seat_rounded,
+                      color: _textSecondary,
+                      size: 13,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      '$seats',
+                      style: const TextStyle(
+                        color: _textPrimary,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+
+              // Departure time
+              if (departureLabel.isNotEmpty)
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: _surface,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: _border.withAlpha(80)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(
+                        Icons.schedule_rounded,
+                        color: _textSecondary,
+                        size: 13,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        departureLabel,
+                        style: const TextStyle(
+                          color: _textSecondary,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
             ],
           ),
         ],
@@ -545,13 +822,75 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: [
-              _buildNavItem(Icons.map_rounded, 'Explore', 0),
+              _buildNavItem(Icons.explore_rounded, 'Explore', 0),
               _buildNavItem(Icons.receipt_long_rounded, 'Activity', 1),
-              _buildNavItem(Icons.account_balance_wallet_rounded, 'Wallet', 2),
-              _buildNavItem(Icons.person_rounded, 'Account', 3),
+              _buildAddTripButton(),
+              _buildNavItem(Icons.account_balance_wallet_rounded, 'Wallet', 3),
+              _buildNavItem(Icons.person_rounded, 'Account', 4),
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildAddTripButton() {
+    return GestureDetector(
+      onTap: () async {
+        final result = await Navigator.push(
+          context,
+          PageRouteBuilder(
+            pageBuilder: (_, __, ___) => const AddTripScreen(),
+            transitionsBuilder: (_, animation, __, child) {
+              return SlideTransition(
+                position:
+                    Tween<Offset>(
+                      begin: const Offset(0, 1),
+                      end: Offset.zero,
+                    ).animate(
+                      CurvedAnimation(
+                        parent: animation,
+                        curve: Curves.easeOutCubic,
+                      ),
+                    ),
+                child: child,
+              );
+            },
+            transitionDuration: const Duration(milliseconds: 350),
+          ),
+        );
+        // Refresh trips when returning from add trip screen
+        if (result == true && mounted) {
+          _fetchTrips();
+        }
+      },
+      child: Container(
+        width: 56,
+        height: 56,
+        margin: const EdgeInsets.only(bottom: 4),
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            colors: [_accent, Color(0xFF8B7BFF)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          shape: BoxShape.circle,
+          boxShadow: [
+            BoxShadow(
+              color: _accent.withAlpha(100),
+              blurRadius: 16,
+              spreadRadius: 2,
+              offset: const Offset(0, 4),
+            ),
+            BoxShadow(
+              color: _accent.withAlpha(40),
+              blurRadius: 32,
+              spreadRadius: 4,
+              offset: const Offset(0, 8),
+            ),
+          ],
+        ),
+        child: const Icon(Icons.add_rounded, color: Colors.white, size: 30),
       ),
     );
   }
@@ -560,7 +899,13 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     final bool isSelected = _currentNavIndex == index;
 
     return GestureDetector(
-      onTap: () => setState(() => _currentNavIndex = index),
+      onTap: () {
+        if (index == 4) {
+          _showAccountMenu();
+          return;
+        }
+        setState(() => _currentNavIndex = index);
+      },
       behavior: HitTestBehavior.opaque,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 250),

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
 import 'login_screen.dart';
+import '../services/auth_service.dart';
 
 class SignupScreen extends StatefulWidget {
   const SignupScreen({super.key});
@@ -149,25 +150,89 @@ class _SignupScreenState extends State<SignupScreen>
       return;
     }
     setState(() => _isLoading = true);
-    await Future.delayed(const Duration(seconds: 2));
-    setState(() => _isLoading = false);
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          backgroundColor: _success,
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(10),
-          ),
-          content: const Text(
-            'Account created! Welcome to AlgoRide 🚀',
-            style: TextStyle(
-              color: Colors.black87,
-              fontWeight: FontWeight.w600,
+    try {
+      await AuthService.instance.signUpWithEmail(
+        _emailCtrl.text,
+        _passwordCtrl.text,
+        _nameCtrl.text,
+      );
+      // StreamBuilder in main.dart handles navigation automatically
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: _success,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
+            content: const Text(
+              'Account created! Welcome to AlgoRide 🚀',
+              style: TextStyle(
+                color: Colors.black87,
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ),
-        ),
-      );
+        );
+      }
+    } on Exception catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: _error,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
+            content: Text(
+              e
+                  .toString()
+                  .replaceAll('Exception: ', '')
+                  .replaceAll(RegExp(r'\[.*?\]'), '')
+                  .trim(),
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _handleGoogleSignUp() async {
+    setState(() => _isLoading = true);
+    try {
+      await AuthService.instance.signInWithGoogle();
+      // StreamBuilder in main.dart handles navigation automatically
+    } on Exception catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: _error,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
+            content: Text(
+              e
+                  .toString()
+                  .replaceAll('Exception: ', '')
+                  .replaceAll(RegExp(r'\[.*?\]'), '')
+                  .trim(),
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -443,7 +508,7 @@ class _SignupScreenState extends State<SignupScreen>
 
   Widget _buildGoogleButton() {
     return OutlinedButton.icon(
-      onPressed: () {},
+      onPressed: _handleGoogleSignUp,
       style: OutlinedButton.styleFrom(
         padding: const EdgeInsets.symmetric(vertical: 14),
         side: const BorderSide(color: _border),

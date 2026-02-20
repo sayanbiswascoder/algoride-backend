@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
 import 'signup_screen.dart';
-import 'home_screen.dart';
+import '../services/auth_service.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -89,13 +89,70 @@ class _LoginScreenState extends State<LoginScreen>
   Future<void> _handleLogin() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _isLoading = true);
-    await Future.delayed(const Duration(seconds: 2));
-    setState(() => _isLoading = false);
-    if (mounted) {
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (_) => const HomeScreen()),
+    try {
+      await AuthService.instance.signInWithEmail(
+        _emailCtrl.text,
+        _passwordCtrl.text,
       );
+      // StreamBuilder in main.dart handles navigation automatically
+    } on Exception catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: _error,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
+            content: Text(
+              e
+                  .toString()
+                  .replaceAll('Exception: ', '')
+                  .replaceAll(RegExp(r'\[.*?\]'), '')
+                  .trim(),
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _handleGoogleSignIn() async {
+    setState(() => _isLoading = true);
+    try {
+      await AuthService.instance.signInWithGoogle();
+      // StreamBuilder in main.dart handles navigation automatically
+    } on Exception catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: _error,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
+            content: Text(
+              e
+                  .toString()
+                  .replaceAll('Exception: ', '')
+                  .replaceAll(RegExp(r'\[.*?\]'), '')
+                  .trim(),
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -297,7 +354,7 @@ class _LoginScreenState extends State<LoginScreen>
 
   Widget _buildGoogleButton() {
     return OutlinedButton.icon(
-      onPressed: () {},
+      onPressed: _handleGoogleSignIn,
       style: OutlinedButton.styleFrom(
         padding: const EdgeInsets.symmetric(vertical: 14),
         side: const BorderSide(color: _border),

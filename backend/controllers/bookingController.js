@@ -4,6 +4,7 @@
  * Uses Firestore with transactions for atomic operations.
  */
 const { db } = require('../models/firebase');
+const fetch = require('node-fetch');
 
 const bookingsRef = db.collection('bookings');
 const tripsRef = db.collection('trips');
@@ -30,8 +31,8 @@ async function createBooking(req, res) {
             if (trip.seatsAvailable < seats) throw new Error(`Only ${trip.seatsAvailable} seats available`);
             if (trip.driverId === riderId) throw new Error('Driver cannot book own trip');
 
-            // Calculate fare: distance × pricePerKm × seats
-            const totalFare = parseFloat((trip.distance * trip.pricePerKm * seats).toFixed(6));
+            // Calculate fare: flat price × seats
+            const totalFare = parseFloat((trip.price * seats).toFixed(6));
 
             const bookingData = {
                 tripId,
@@ -115,4 +116,106 @@ async function updateBookingStatus(req, res) {
     }
 }
 
-module.exports = { createBooking, getBookingsByUser, updateBookingStatus };
+// POST /api/bookings/:id/confirm-payment — Verify on-chain ALGO tx and confirm booking
+async function confirmBookingPayment(req, res) {
+    try {
+        const { txId } = req.body;
+        const bookingId = req.params.id;
+
+        if (!txId) {
+            return res.status(400).json({ error: 'txId is required' });
+        }
+
+        // Fetch the booking
+        const bookingDoc = await bookingsRef.doc(bookingId).get();
+        if (!bookingDoc.exists) {
+            return res.status(404).json({ error: 'Booking not found' });
+        }
+        const booking = bookingDoc.data();
+
+        if (booking.status === 'confirmed') {
+            return res.status(400).json({ error: 'Booking is already confirmed' });
+        }
+
+        // Fetch the trip to get driver wallet and verify fare
+        const tripDoc = await tripsRef.doc(booking.tripId).get();
+        if (!tripDoc.exists) {
+            return res.status(404).json({ error: 'Trip not found' });
+        }
+        const trip = tripDoc.data();
+
+        // Get driver wallet address
+        const driverDoc = await usersRef.doc(trip.driverId).get();
+        if (!driverDoc.exists || !driverDoc.data().walletAddress) {
+            return res.status(400).json({ error: 'Driver has no wallet address' });
+        }
+        const driverWallet = driverDoc.data().walletAddress;
+
+        // Verify the transaction on-chain via Algorand Indexer (TestNet)
+        const indexerUrl = `https://testnet-idx.algonode.cloud/v2/transactions/${txId}`;
+        const txResponse = await fetch(indexerUrl);
+
+        if (!txResponse.ok) {
+            return res.status(400).json({ error: 'Transaction not found on chain. Please wait a moment and try again.' });
+        }
+
+        const txData = await txResponse.json();
+        const tx = txData.transaction;
+
+        if (!tx) {
+            return res.status(400).json({ error: 'Invalid transaction data' });
+        }
+
+        // Verify it's a payment transaction
+        if (tx['tx-type'] !== 'pay') {
+            return res.status(400).json({ error: 'Transaction is not a payment transaction' });
+        }
+
+        // Verify receiver matches driver wallet
+        const paymentDetails = tx['payment-transaction'];
+        if (!paymentDetails) {
+            return res.status(400).json({ error: 'No payment details in transaction' });
+        }
+
+        const txReceiver = paymentDetails.receiver;
+        if (txReceiver.toUpperCase() !== driverWallet.toUpperCase()) {
+            return res.status(400).json({ error: 'Transaction receiver does not match driver wallet' });
+        }
+
+        // Verify amount (totalFare is in ALGO, tx amount is in microAlgos)
+        const expectedMicroAlgos = Math.floor(booking.totalFare * 1000000);
+        const txAmount = paymentDetails.amount;
+        // Allow 1% tolerance for rounding
+        if (txAmount < expectedMicroAlgos * 0.99) {
+            return res.status(400).json({
+                error: `Insufficient payment. Expected ${booking.totalFare} ALGO, got ${txAmount / 1000000} ALGO`,
+            });
+        }
+
+        // All verified — update booking and create payment record
+        await bookingsRef.doc(bookingId).update({
+            status: 'confirmed',
+            paymentTxId: txId,
+        });
+
+        // Create payment record
+        const paymentData = {
+            bookingId,
+            userId: booking.riderId,
+            txId,
+            amount: booking.totalFare,
+            status: 'completed',
+            verifiedOnChain: true,
+            createdAt: new Date().toISOString(),
+        };
+        await db.collection('payments').add(paymentData);
+
+        const updated = await bookingsRef.doc(bookingId).get();
+        res.json({ id: updated.id, ...updated.data(), paymentVerified: true });
+    } catch (err) {
+        console.error('confirmBookingPayment error:', err);
+        res.status(500).json({ error: 'Failed to confirm payment' });
+    }
+}
+
+module.exports = { createBooking, getBookingsByUser, updateBookingStatus, confirmBookingPayment };
