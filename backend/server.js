@@ -41,3 +41,6 @@ app.use((err, _req, res, _next) => {
 app.listen(PORT, () => {
   console.log(`🚗 Campus Ride-Share API running on http://localhost:${PORT}`);
 });
+
+// Export for Vercel serverless
+module.exports = app;

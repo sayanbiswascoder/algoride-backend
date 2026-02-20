@@ -11,6 +11,20 @@ class TripService {
   String get _baseUrl =>
       dotenv.env['BACKEND_URL'] ?? 'http://10.0.2.2:5000/api';
 
+  /// Safely decodes JSON from an HTTP response.
+  /// Throws a clear error when the server returns HTML (e.g. Vercel 404 page)
+  /// instead of JSON.
+  dynamic _decodeJson(http.Response response) {
+    final contentType = response.headers['content-type'] ?? '';
+    if (!contentType.contains('application/json')) {
+      throw Exception(
+        'Server returned non-JSON response (${response.statusCode}). '
+        'Check that the backend URL is correct and the route exists.',
+      );
+    }
+    return jsonDecode(response.body);
+  }
+
   /// Gets an authorization header with the current user's Firebase ID token.
   Future<Map<String, String>> _authHeaders() async {
     final user = FirebaseAuth.instance.currentUser;
@@ -51,9 +65,9 @@ class TripService {
     );
 
     if (response.statusCode == 201) {
-      return jsonDecode(response.body) as Map<String, dynamic>;
+      return _decodeJson(response) as Map<String, dynamic>;
     } else {
-      final error = jsonDecode(response.body);
+      final error = _decodeJson(response);
       throw Exception(error['error'] ?? 'Failed to create trip');
     }
   }
@@ -80,10 +94,10 @@ class TripService {
     final response = await http.get(uri, headers: headers);
 
     if (response.statusCode == 200) {
-      final List<dynamic> data = jsonDecode(response.body);
+      final List<dynamic> data = _decodeJson(response);
       return data.cast<Map<String, dynamic>>();
     } else {
-      final error = jsonDecode(response.body);
+      final error = _decodeJson(response);
       throw Exception(error['error'] ?? 'Failed to fetch trips');
     }
   }
@@ -100,10 +114,10 @@ class TripService {
     );
 
     if (response.statusCode == 200) {
-      final List<dynamic> data = jsonDecode(response.body);
+      final List<dynamic> data = _decodeJson(response);
       return data.cast<Map<String, dynamic>>();
     } else {
-      final error = jsonDecode(response.body);
+      final error = _decodeJson(response);
       throw Exception(error['error'] ?? 'Failed to fetch bookings');
     }
   }
@@ -120,10 +134,10 @@ class TripService {
     );
 
     if (response.statusCode == 200) {
-      final List<dynamic> data = jsonDecode(response.body);
+      final List<dynamic> data = _decodeJson(response);
       return data.cast<Map<String, dynamic>>();
     } else {
-      final error = jsonDecode(response.body);
+      final error = _decodeJson(response);
       throw Exception(error['error'] ?? 'Failed to fetch your trips');
     }
   }
@@ -150,9 +164,9 @@ class TripService {
     );
 
     if (response.statusCode == 201) {
-      return jsonDecode(response.body) as Map<String, dynamic>;
+      return _decodeJson(response) as Map<String, dynamic>;
     } else {
-      final error = jsonDecode(response.body);
+      final error = _decodeJson(response);
       throw Exception(error['error'] ?? 'Failed to create booking');
     }
   }
@@ -174,9 +188,9 @@ class TripService {
     );
 
     if (response.statusCode == 200) {
-      return jsonDecode(response.body) as Map<String, dynamic>;
+      return _decodeJson(response) as Map<String, dynamic>;
     } else {
-      final error = jsonDecode(response.body);
+      final error = _decodeJson(response);
       throw Exception(error['error'] ?? 'Failed to update booking');
     }
   }
